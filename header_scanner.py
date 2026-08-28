@@ -1,11 +1,56 @@
 #!/usr/bin/env python3
 """
 Website Security Header Scanner
-Fetches HTTP response headers for a given URL and displays them raw.
+Fetches HTTP response headers and checks them against security best practices.
 """
 
 import sys
 import requests
+
+# ---------------------------------------------------------------------------
+# Header definitions: what we check for, why it matters, and how to score it
+# ---------------------------------------------------------------------------
+
+SECURITY_HEADERS = {
+    "Strict-Transport-Security": {
+        "points": 15,
+        "description": "Forces browsers to use HTTPS, preventing downgrade "
+                        "attacks and cookie hijacking over plain HTTP.",
+        "check": lambda v: v is not None,
+    },
+    "Content-Security-Policy": {
+        "points": 20,
+        "description": "Restricts which sources scripts/styles/images can "
+                        "load from, mitigating XSS and data injection attacks.",
+        "check": lambda v: v is not None,
+    },
+    "X-Frame-Options": {
+        "points": 15,
+        "description": "Prevents the site from being embedded in an <iframe>, "
+                        "protecting against clickjacking attacks.",
+        "check": lambda v: v is not None and v.upper() in ("DENY", "SAMEORIGIN"),
+    },
+    "X-Content-Type-Options": {
+        "points": 10,
+        "description": "Stops browsers from MIME-sniffing a response away "
+                        "from its declared content type, blocking certain "
+                        "drive-by download attacks.",
+        "check": lambda v: v is not None and v.lower() == "nosniff",
+    },
+    "Referrer-Policy": {
+        "points": 10,
+        "description": "Controls how much referrer information (URL data) "
+                        "is leaked when navigating away from the site.",
+        "check": lambda v: v is not None,
+    },
+    "Permissions-Policy": {
+        "points": 10,
+        "description": "Restricts which browser features (camera, mic, "
+                        "geolocation, etc.) the page and its embedded content "
+                        "can access.",
+        "check": lambda v: v is not None,
+    },
+}
 
 
 def fetch_headers(url: str, timeout: int = 10) -> dict:
@@ -20,6 +65,23 @@ def fetch_headers(url: str, timeout: int = 10) -> dict:
         }
     except requests.exceptions.RequestException as e:
         return {"error": str(e)}
+
+
+def score_headers(headers) -> dict:
+    """Evaluate headers against SECURITY_HEADERS, return per-header results."""
+    results = {}
+    for name, rule in SECURITY_HEADERS.items():
+        value = headers.get(name)
+        passed = rule["check"](value)
+        results[name] = {
+            "present": value is not None,
+            "value": value,
+            "passed": passed,
+            "points": rule["points"] if passed else 0,
+            "max_points": rule["points"],
+            "description": rule["description"],
+        }
+    return results
 
 
 def main():
@@ -38,9 +100,12 @@ def main():
 
     print(f"Status code: {result['status_code']}")
     print(f"Final URL: {result['final_url']}\n")
-    print("Raw headers:")
-    for k, v in result["headers"].items():
-        print(f"  {k}: {v}")
+
+    header_results = score_headers(result["headers"])
+    print("Security header check:")
+    for name, r in header_results.items():
+        status = "PASS" if r["passed"] else ("PRESENT BUT WEAK" if r["present"] else "MISSING")
+        print(f"  {name}: {status} (value: {r['value']})")
 
 
 if __name__ == "__main__":
