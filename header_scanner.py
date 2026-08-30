@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """
 Website Security Header Scanner
-Fetches headers, checks them, grades the site, and analyzes cookie security flags.
+Fetches headers, scores/grades the site, checks cookies, and displays
+a nicely formatted colored report in the terminal.
 """
 
 import sys
 from urllib.parse import urlparse
 import requests
+from rich.console import Console
+from rich.table import Table
+from rich.panel import Panel
+
+console = Console()
 
 SECURITY_HEADERS = {
     "Strict-Transport-Security": {
@@ -82,7 +88,6 @@ def check_https_redirect(url: str, timeout: int = 10) -> bool:
 
 
 def analyze_cookies(raw_cookies: list) -> dict:
-    """Parse Set-Cookie lines and check for Secure, HttpOnly, SameSite flags."""
     cookies = []
     for line in raw_cookies:
         parts = [p.strip() for p in line.split(";")]
@@ -176,32 +181,85 @@ def scan_url(url: str) -> dict:
     }
 
 
-def main():
-    if len(sys.argv) < 2:
-        print("Usage: python header_scanner.py <url>")
-        sys.exit(1)
+# ---------------------------------------------------------------------------
+# Formatted output using rich
+# ---------------------------------------------------------------------------
 
-    result = scan_url(sys.argv[1])
+GRADE_COLORS = {
+    "A": "bright_green",
+    "B": "green",
+    "C": "yellow",
+    "D": "dark_orange",
+    "F": "red",
+}
+
+
+def print_report(result: dict):
     if result.get("error"):
-        print(f"Error scanning {result['url']}: {result['error']}")
+        console.print(f"[red]Error scanning {result['url']}: {result['error']}[/red]")
         return
 
-    print(f"\n{result['url']}")
-    print(f"Score: {result['score']}/{result['max_score']}   Grade: {result['grade']}")
-    print(f"HTTPS redirect: {'YES' if result['https_redirect'] else 'NO'}\n")
+    grade = result["grade"]
+    color = GRADE_COLORS.get(grade, "white")
 
-    print("Security header check:")
+    console.print(Panel(
+        f"[bold]{result['url']}[/bold]\n"
+        f"Score: {result['score']}/{result['max_score']}   "
+        f"Grade: [bold {color}]{grade}[/bold {color}]   "
+        f"HTTPS redirect: {'✅' if result['https_redirect'] else '❌'}",
+        title="Scan Result",
+        border_style=color,
+    ))
+
+    table = Table(show_header=True, header_style="bold cyan")
+    table.add_column("Header")
+    table.add_column("Status")
+    table.add_column("Value", overflow="fold")
+
     for name, r in result["header_results"].items():
-        status = "PASS" if r["passed"] else ("PRESENT BUT WEAK" if r["present"] else "MISSING")
-        print(f"  {name}: {status} (value: {r['value']})")
+        status = "[green]✅ Pass[/green]" if r["passed"] else (
+            "[yellow]⚠ Weak[/yellow]" if r["present"] else "[red]❌ Missing[/red]"
+        )
+        value = r["value"] if r["value"] else "-"
+        table.add_row(name, status, value)
+
+    console.print(table)
 
     cookies = result["cookie_results"]["cookies"]
     if cookies:
-        print(f"\nCookie flags ({result['cookie_results']['points']}/{result['cookie_results']['max_points']} pts):")
+        console.print(
+            f"\n[bold cyan]Cookie flags[/bold cyan] "
+            f"({result['cookie_results']['points']}/{result['cookie_results']['max_points']} pts)"
+        )
+        cookie_table = Table(show_header=True, header_style="bold cyan")
+        cookie_table.add_column("Cookie")
+        cookie_table.add_column("Secure")
+        cookie_table.add_column("HttpOnly")
+        cookie_table.add_column("SameSite")
+
+        def flag(ok: bool) -> str:
+            return "[green]✅[/green]" if ok else "[red]❌[/red]"
+
         for c in cookies:
-            print(f"  {c['name']}: Secure={c['secure']} HttpOnly={c['httponly']} SameSite={c['samesite']}")
+            cookie_table.add_row(
+                c["name"],
+                flag(c["secure"]),
+                flag(c["httponly"]),
+                f"[green]{c['samesite']}[/green]" if c["samesite"] else "[red]❌[/red]",
+            )
+        console.print(cookie_table)
     else:
-        print("\nNo cookies set by this site.")
+        console.print("\n[dim]No cookies set by this site.[/dim]")
+
+
+def main():
+    if len(sys.argv) < 2:
+        console.print("Usage: python header_scanner.py <url>")
+        sys.exit(1)
+
+    console.print(f"\n[bold blue]Scanning {sys.argv[1]}...[/bold blue]")
+    result = scan_url(sys.argv[1])
+    print_report(result)
 
 
 if __name__ == "__main__":
