@@ -90,5 +90,3 @@ information any browser receives when visiting a site. It performs no
 exploitation, authentication bypass, or unauthorized access of any kind,
 and is safe to run against any public website.
 
-## Author
-[Your name] — [Course / elective name] — [Date]
